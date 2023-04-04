@@ -1,0 +1,269 @@
+---
+title: "Experiment 1"
+author: "Carolyn Ritchey"
+date: "06/15/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library("tidyverse")    
+library("furniture")
+library("psych")
+library("corrplot")    
+library("nortest")
+library("lmerTest")
+library("lme4")
+library("optimx")  
+library("Hmisc")
+library("lsmeans")
+library("effects")
+library("readxl")
+library("optimx")
+library("gdata") #for interleave
+library("ggplot2")
+library("dplyr")
+library("MuMIn")
+
+#import data
+TimeSpent_LogRatio<-read.csv("/Users/cmr0112/Desktop/ToshiAnalysis-Exp1.csv")
+TimeSpent_LogRatio$ID <- as.factor(TimeSpent_LogRatio$ID)
+TimeSpent_LogRatio$Condition <- as.factor(TimeSpent_LogRatio$Condition)
+TimeSpent_LogRatio$Phase <- as.factor(TimeSpent_LogRatio$Phase)
+```
+
+```{r Data_Inspection}
+
+#Condition means + standard error
+TimeSpent_LogRatio %>%
+  group_by(Condition, Phase) %>%
+  dplyr::summarize(rawMeans = mean(Data),
+                   se   = sd(Data)/sqrt(n())) %>%
+  ggplot(aes(x = Phase, y = rawMeans, color=Condition)) +
+  geom_line() +
+  geom_errorbar(aes(ymin = rawMeans - se, ymax = rawMeans + se))+
+  theme_bw()
+
+```
+
+```{r }
+
+# TimeSpent_LogRatio_Empty <- lmer(Data ~ 1 + (1 | ID), 
+#                    data = TimeSpent_LogRatio, 
+#                    REML = FALSE)
+# 
+# summary(TimeSpent_LogRatio_Empty)
+# 
+# #variances
+# VarCorr(TimeSpent_LogRatio_Empty)
+# 
+# ICC_TimeSpent_LogRatio<-0.00000 /(0.00000 +0.43509)
+# ICC_TimeSpent_LogRatio
+
+```
+
+```{r RE_Structure}
+
+e1RE.0 = lmer(Data ~ Phase * Condition + (1 | ID),
+                  data = TimeSpent_LogRatio,
+                  REML = TRUE,
+                  control = lmerControl(optimizer = "optimx",
+                  calc.derivs = FALSE,
+                  optCtrl = list(method = "nlminb",
+                  starttests = FALSE,
+                  kkt = FALSE)))
+
+e1RE.1 = lmer(Data ~ Phase * Condition + (Phase | ID),
+                  data = TimeSpent_LogRatio,
+                  REML = TRUE,
+                  control = lmerControl(optimizer = "optimx",
+                  calc.derivs = FALSE,
+                  optCtrl = list(method = "nlminb",
+                  starttests = FALSE,
+                  kkt = FALSE)))
+
+e1RE.2 = lmer(Data ~ Phase * Condition + (Phase + Condition | ID),
+                  data = TimeSpent_LogRatio,
+                  REML = TRUE,
+                  control = lmerControl(optimizer = "optimx",
+                  calc.derivs = FALSE,
+                  optCtrl = list(method = "nlminb",
+                  starttests = FALSE,
+                  kkt = FALSE)))
+
+MuMIn::AICc(e1RE.0,
+    e1RE.1, e1RE.2)
+ 
+#         df  AICc
+# e1RE.0	14	56.93089		
+# e1RE.1	19	56.69516		
+# e1RE.2	34	97.93028		
+
+#going with e1RE.1
+
+```
+
+```{r Fixed_Effects_Target}
+
+car::Anova(e1RE.1)
+
+# Response: Data
+#                   Chisq Df Pr(>Chisq)    
+# Phase            39.286  2  2.946e-09 ***
+# Condition        84.715  3  < 2.2e-16 ***
+# Phase:Condition 110.178  6  < 2.2e-16 ***
+
+```
+
+```{r Residuals_Target}
+
+#Checking residuals
+TimeSpent_LogRatio$pred = predict(e1RE.1)
+TimeSpent_LogRatio$resid = resid(e1RE.1)
+
+TimeSpent_LogRatioP1<-filter(TimeSpent_LogRatio,Phase=="B1")
+by(TimeSpent_LogRatioP1$resid,TimeSpent_LogRatioP1$Condition,hist)
+
+TimeSpent_LogRatioP2<-filter(TimeSpent_LogRatio,Phase=="A2")
+by(TimeSpent_LogRatioP2$resid,TimeSpent_LogRatioP2$Condition,hist)
+
+TimeSpent_LogRatioP3<-filter(TimeSpent_LogRatio,Phase=="C3")
+by(TimeSpent_LogRatioP3$resid,TimeSpent_LogRatioP3$Condition,hist)
+
+```
+
+```{r Model_Predictions}
+
+TimeSpent_LogRatio %>%
+  group_by(Condition, Phase) %>%
+  dplyr::summarize(predMean = mean(pred),
+                   se   = sd(pred)/sqrt(n())) %>%
+  ggplot(aes(x = Phase, y = predMean, color=Condition)) +
+  geom_line() +
+  geom_errorbar(aes(ymin = predMean - se, ymax = predMean + se))+
+  theme_bw()
+
+write.csv(TimeSpent_LogRatio,"/Users/cmr0112/Desktop/e1_Pred.csv")
+
+```
+
+```{r Specific_Comparisons_Target}
+
+#...looking @ last bin in Phase 1,2; first bin Phase 3 -- all coded '0'
+
+emmeans::emmeans(e1RE.1, pairwise~Condition|Phase, adjust="Holm",at = list(Bin = c(0)))
+
+# Phase = A2:
+#  contrast                                       estimate    SE df t.ratio p.value
+#  (Absent-Absent) - Chasing vs. Absent            -1.3059 0.102 63 -12.860 <.0001 
+#  (Absent-Absent) - Chasing vs. Motionless        -0.7363 0.102 63  -7.251 <.0001 
+#  (Absent-Absent) - Motionless vs. Absent         -0.3022 0.102 63  -2.976 0.0041 
+#  Chasing vs. Absent - Chasing vs. Motionless      0.5696 0.102 63   5.610 <.0001 
+#  Chasing vs. Absent - Motionless vs. Absent       1.0037 0.102 63   9.885 <.0001 
+#  Chasing vs. Motionless - Motionless vs. Absent   0.4341 0.102 63   4.275 0.0001 
+# 
+# Phase = B1:
+#  contrast                                       estimate    SE df t.ratio p.value
+#  (Absent-Absent) - Chasing vs. Absent            -0.0959 0.102 63  -0.945 1.0000 
+#  (Absent-Absent) - Chasing vs. Motionless         0.0159 0.102 63   0.157 1.0000 
+#  (Absent-Absent) - Motionless vs. Absent         -0.0472 0.102 63  -0.465 1.0000 
+#  Chasing vs. Absent - Chasing vs. Motionless      0.1118 0.102 63   1.101 1.0000 
+#  Chasing vs. Absent - Motionless vs. Absent       0.0487 0.102 63   0.480 1.0000 
+#  Chasing vs. Motionless - Motionless vs. Absent  -0.0631 0.102 63  -0.621 1.0000 
+# 
+# Phase = C3:
+#  contrast                                       estimate    SE df t.ratio p.value
+#  (Absent-Absent) - Chasing vs. Absent            -0.1615 0.102 63  -1.591 0.5832 
+#  (Absent-Absent) - Chasing vs. Motionless         0.0831 0.102 63   0.818 1.0000 
+#  (Absent-Absent) - Motionless vs. Absent         -0.0694 0.102 63  -0.684 1.0000 
+#  Chasing vs. Absent - Chasing vs. Motionless      0.2446 0.102 63   2.409 0.1136 
+#  Chasing vs. Absent - Motionless vs. Absent       0.0921 0.102 63   0.907 1.0000 
+#  Chasing vs. Motionless - Motionless vs. Absent  -0.1525 0.102 63  -1.502 0.5832 
+
+#--
+# Phase = A2:
+#  Condition                 emmean     SE   df lower.CL upper.CL
+#  Absent-Absent          -0.035767 0.1093 14.9  -0.2688    0.197
+#  Chasing vs. Absent      1.270113 0.1093 14.9   1.0371    1.503
+#  Chasing vs. Motionless  0.700502 0.1093 14.9   0.4675    0.934
+#  Motionless vs. Absent   0.266394 0.1093 14.9   0.0334    0.499
+
+emmeans::emmeans(e1RE.1, pairwise~Phase|Condition,adjust="Holm",at = list(Bin = c(0)))
+
+# Condition = Absent-Absent:
+#  contrast estimate    SE   df t.ratio p.value
+#  A2 - B1   -0.0524 0.119 28.9 -0.439  1.0000 
+#  A2 - C3   -0.0868 0.132 21.2 -0.658  1.0000 
+#  B1 - C3   -0.0344 0.104 51.2 -0.332  1.0000 
+# 
+# Condition = Chasing vs. Absent:
+#  contrast estimate    SE   df t.ratio p.value
+#  A2 - B1    1.1576 0.119 28.9  9.697  <.0001 
+#  A2 - C3    1.0575 0.132 21.2  8.018  <.0001 
+#  B1 - C3   -0.1001 0.104 51.2 -0.964  0.3394 
+# 
+# Condition = Chasing vs. Motionless:
+#  contrast estimate    SE   df t.ratio p.value
+#  A2 - B1    0.6998 0.119 28.9  5.862  <.0001 
+#  A2 - C3    0.7325 0.132 21.2  5.554  <.0001 
+#  B1 - C3    0.0328 0.104 51.2  0.316  0.7536 
+# 
+# Condition = Motionless vs. Absent:
+#  contrast estimate    SE   df t.ratio p.value
+#  A2 - B1    0.2026 0.119 28.9  1.697  0.3012 
+#  A2 - C3    0.1459 0.132 21.2  1.106  0.5620 
+#  B1 - C3   -0.0567 0.104 51.2 -0.546  0.5873 
+ 
+#--
+# Condition = Chasing vs. Absent:
+#  Phase    emmean     SE   df lower.CL upper.CL
+#  A2     1.270113 0.1093 14.9   1.0371    1.503
+#  B1     0.112532 0.0744 48.1  -0.0371    0.262
+#  C3     0.212601 0.0718 55.9   0.0687    0.356
+# 
+# Condition = Chasing vs. Motionless:
+#  Phase    emmean     SE   df lower.CL upper.CL
+#  A2     0.700502 0.1093 14.9   0.4675    0.934
+#  B1     0.000728 0.0744 48.1  -0.1489    0.150
+#  C3    -0.032025 0.0718 55.9  -0.1759    0.112
+```
+
+```{r Summary}
+
+summary(e1RE.1)
+
+# Linear mixed model fit by REML. t-tests use Satterthwaite's method ['lmerModLmerTest']
+# Formula: Data ~ Phase * Condition + (Phase | ID)
+#    Data: TimeSpent_LogRatio
+# Control: lmerControl(optimizer = "optimx", calc.derivs = FALSE, optCtrl = list(method = "nlminb",  
+#     starttests = FALSE, kkt = FALSE))
+# 
+# REML criterion at convergence: 8.7
+# 
+# Scaled residuals: 
+#     Min      1Q  Median      3Q     Max 
+# -2.2110 -0.4298 -0.0636  0.4478  4.3837 
+# 
+# Random effects:
+#  Groups   Name        Variance Std.Dev. Corr       
+#  ID       (Intercept) 0.05430  0.2330              
+#           PhaseB1     0.03151  0.1775   -1.00      
+#           PhaseC3     0.05669  0.2381   -1.00  1.00
+#  Residual             0.04124  0.2031              
+# Number of obs: 96, groups:  ID, 8
+# 
+# Fixed effects:
+#                                         Estimate Std. Error       df t value Pr(>|t|)    
+# (Intercept)                             -0.03577    0.10928 15.02073  -0.327   0.7480    
+# PhaseB1                                  0.05239    0.11937 31.68398   0.439   0.6637    
+# PhaseC3                                  0.08682    0.13190 21.60674   0.658   0.5173    
+# ConditionChasing vs. Absent              1.30588    0.10154 77.00001  12.860  < 2e-16 ***
+# ConditionChasing vs. Motionless          0.73627    0.10154 77.00001   7.251 2.77e-10 ***
+# ConditionMotionless vs. Absent           0.30216    0.10154 77.00001   2.976   0.0039 ** 
+# PhaseB1:ConditionChasing vs. Absent     -1.20997    0.14360 77.00001  -8.426 1.54e-12 ***
+# PhaseC3:ConditionChasing vs. Absent     -1.14433    0.14360 77.00001  -7.969 1.17e-11 ***
+# PhaseB1:ConditionChasing vs. Motionless -0.75216    0.14360 77.00001  -5.238 1.37e-06 ***
+# PhaseC3:ConditionChasing vs. Motionless -0.81935    0.14360 77.00001  -5.706 2.05e-07 ***
+# PhaseB1:ConditionMotionless vs. Absent  -0.25498    0.14360 77.00001  -1.776   0.0797 .  
+# PhaseC3:ConditionMotionless vs. Absent  -0.23274    0.14360 77.00001  -1.621   0.1092    
+
+```
